@@ -1,4 +1,5 @@
 import os
+import time
 from recbole_utils import RecUtils
 import pandas as pd
 import json
@@ -10,7 +11,7 @@ import torch
 
 MODEL = "LightGCN"
 # 处理的数据集
-DATASET = "ml-100k"  # 修改为ml-1m以匹配实际数据集
+DATASET = "ml-1m"  
 TOPK=20
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
 config_files = f"config_file/{DATASET}.yaml"
@@ -23,7 +24,7 @@ config_file_list = (
 rec_utils = RecUtils(model=MODEL, dataset=DATASET, config_file_list=config_file_list, config_dict=config)
 
 # 将训练集划分为1%的Forget set和99%的Remain set
-def split_trainset_for_unlearning(trainset, forget_ratio=0.1, random_state=42):
+def split_trainset_for_unlearning(trainset, forget_ratio=0.01, random_state=42):
     """
     将训练集划分为Forget set和Remain set
     
@@ -55,8 +56,44 @@ def split_trainset_for_unlearning(trainset, forget_ratio=0.1, random_state=42):
     
     return forget_set, remain_set
 
+def split_trainset_for_unlearning_by_interactions(trainset, forget_ratio=0.01, random_state=42):
+    """
+    将训练集按交互记录随机划分为Forget set和Remain set（不按用户划分）
+    
+    Args:
+        trainset: 原始训练集DataFrame
+        forget_ratio: 需要遗忘的数据比例，默认为0.1(10%)
+        random_state: 随机种子，确保结果可重现
+        
+    Returns:
+        forget_set: 需要遗忘的数据集
+        remain_set: 剩余需要保留的数据集
+    """
+    # 设置随机种子以确保结果可重现
+    np.random.seed(random_state)
+    
+    # 获取所有交互记录的索引
+    all_indices = trainset.index.tolist()
+    
+    # 随机选择指定比例的交互记录作为forget set
+    num_forget_interactions = max(1, int(len(all_indices) * forget_ratio))
+    forget_indices = np.random.choice(all_indices, size=num_forget_interactions, replace=False)
+    
+    # 创建布尔索引
+    forget_mask = trainset.index.isin(forget_indices)
+    
+    # 划分数据集
+    forget_set = trainset[forget_mask].copy()
+    remain_set = trainset[~forget_mask].copy()
+    
+    return forget_set, remain_set
+
 # 执行划分
-forget_set, remain_set = split_trainset_for_unlearning(rec_utils.ori_trainset)
+# 使用按用户划分的方法
+# forget_set, remain_set = split_trainset_for_unlearning(rec_utils.ori_trainset)
+
+# 使用按交互记录随机划分的方法
+forget_set, remain_set = split_trainset_for_unlearning_by_interactions(rec_utils.ori_trainset)
 
 # 输出划分结果信息
 print(f"原始训练集大小: {len(rec_utils.ori_trainset)}")
@@ -78,14 +115,28 @@ os.makedirs(f"dataset/{DATASET}-remain", exist_ok=True)
 # 保存forget set，添加表头
 forget_file_path = f"dataset/{DATASET}-forget/{DATASET}-forget.inter"
 with open(forget_file_path, 'w', newline='') as f:
-    f.write("user_id:token\titem_id:token\trating:float\ttimestamp:float\n")
-    forget_set.to_csv(f, sep='\t', index=False, header=False)
+    # 根据数据集类型确定列顺序
+    if DATASET == "netflix-process":
+        f.write("item_id:token\tuser_id:token\trating:float\ttimestamp:float\n")
+        # 保存时调整列顺序以匹配原始文件格式
+        forget_set_reorder = forget_set[['item_id', 'user_id', 'rating', 'timestamp']] if 'timestamp' in forget_set.columns else forget_set[['item_id', 'user_id', 'rating']]
+        forget_set_reorder.to_csv(f, sep='\t', index=False, header=False)
+    else:
+        f.write("user_id:token\titem_id:token\trating:float\ttimestamp:float\n")
+        forget_set.to_csv(f, sep='\t', index=False, header=False)
 
 # 保存remain set，添加表头
 remain_file_path = f"dataset/{DATASET}-remain/{DATASET}-remain.inter"
 with open(remain_file_path, 'w', newline='') as f:
-    f.write("user_id:token\titem_id:token\trating:float\ttimestamp:float\n")
-    remain_set.to_csv(f, sep='\t', index=False, header=False)
+    # 根据数据集类型确定列顺序
+    if DATASET == "netflix":
+        f.write("item_id:token\tuser_id:token\trating:float\ttimestamp:float\n")
+        # 保存时调整列顺序以匹配原始文件格式
+        remain_set_reorder = remain_set[['item_id', 'user_id', 'rating', 'timestamp']] if 'timestamp' in remain_set.columns else remain_set[['item_id', 'user_id', 'rating']]
+        remain_set_reorder.to_csv(f, sep='\t', index=False, header=False)
+    else:
+        f.write("user_id:token\titem_id:token\trating:float\ttimestamp:float\n")
+        remain_set.to_csv(f, sep='\t', index=False, header=False)
 
 print(f"Forget set已保存至: {forget_file_path}")
 print(f"Remain set已保存至: {remain_file_path}")
@@ -380,14 +431,21 @@ def evaluate_unlearning_effect(original_recommendations, adjusted_recommendation
     return evaluation_results
 
 # 示例：对forget用户执行批量遗忘学习过程
+print(f"\n开始执行遗忘学习过程...")
+start_time = time.time()
+
 adjusted_results = batch_unlearning_process(forget_set, topk=TOPK)
 
+end_time = time.time()
+elapsed_time = end_time - start_time
+
 # 保存调整后的推荐结果
-output_file = f"{DATASET}_adjusted_recommendations_after_unlearning.json"
+output_file = f"{DATASET}_{MODEL}_adjusted_recommendations_after_unlearning.json"
 with open(output_file, 'w', encoding='utf-8') as f:
     json.dump(adjusted_results, f, ensure_ascii=False, indent=2)
 
 print(f"\n调整后的推荐结果已保存到 {output_file}")
+print(f"遗忘学习过程耗时: {elapsed_time:.2f} 秒")
 
 # 创建新的推荐结果字典，将调整后的结果替换原始结果
 updated_recommendations = recommendations.copy()  # 复制原始推荐结果

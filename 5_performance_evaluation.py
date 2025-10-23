@@ -9,15 +9,15 @@ from recbole_utils import RecUtils
 
 # 读取 JSON 文件
 
-file_path_list = ['ml-100k_LightGCN_recommendations_top50.json',
-                  'ml-100k-remain_LightGCN_remainset_top50.json',
-                  'ml-100k_LightGCN_recommendations_top20_updated.json']
+file_path_list = ['ml-1m_LightGCN_recommendations_top50.json',
+                  'ml-1m-remain_LightGCN_remainset_top50.json',
+                  'ml-1m_LightGCN_recommendations_top20_updated.json']
 # 获取candidate item 的传统推荐模型
 MODEL = "LightGCN"
 # 处理的数据集
-DATASET = "ml-100k"
+DATASET = "ml-1m"
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
-topK = [5,10,20]
+topK = [10,20]
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False, "topk": topK}
 config_file_list = (

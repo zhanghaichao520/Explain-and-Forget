@@ -6,6 +6,8 @@ import json
 from tqdm import tqdm
 from recbole.utils import set_color
 from enum import Enum
+import time
+
 def find_model_files(directory_path, model_name):
     # 遍历文件夹中的所有文件
     for filename in os.listdir(directory_path):
@@ -20,7 +22,7 @@ HISTORY_INTER_LIMIT = 100
 # 获取candidate item 的传统推荐模型
 MODEL = "LightGCN"
 # 处理的数据集
-DATASET = "ml-100k-remain"
+DATASET = "ml-1m-remain"
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False}
@@ -28,14 +30,19 @@ config_file_list = (
     config_files.strip().split(" ") if config_files else None
 )
 
-
+start_time = time.time()
 rec_utils = RecUtils(model=MODEL, dataset=DATASET, config_file_list=config_file_list, config_dict=config)
+
 
 MODEL_FILE = find_model_files(directory_path=rec_utils.config["checkpoint_dir"], model_name=MODEL)
 # 训练传统模型， 获得模型文件， 用于生成prompt的候选集
 # MODEL_FILE = None
 if MODEL_FILE is None:
     MODEL_FILE = rec_utils.train()
+
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f"retrain过程耗时: {elapsed_time:.2f} 秒")
 
 inter_path = os.path.join(rec_utils.config["data_path"], f"{DATASET}.inter")
 

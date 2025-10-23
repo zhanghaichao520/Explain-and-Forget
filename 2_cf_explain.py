@@ -5,8 +5,8 @@ from recbole_utils import RecUtils
 import os
 import numpy as np
 # 配置参数
-MODEL = "LightGCN"
-DATASET = "ml-1m"  # 使用ml-100k数据集以匹配模型文件
+MODEL = "BPR"
+DATASET = "ml-100k" 
 topK = 50
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False}

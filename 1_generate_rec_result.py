@@ -16,9 +16,9 @@ def find_model_files(directory_path, model_name):
     return None
 
 topK = 50
-MODEL = "LightGCN"
+MODEL = "BPR"
 # 处理的数据集
-DATASET = "ml-1m"
+DATASET = "ml-100k"
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False}
@@ -35,18 +35,16 @@ MODEL_FILE = find_model_files(directory_path=rec_utils.config["checkpoint_dir"],
 if MODEL_FILE is None:
     MODEL_FILE = rec_utils.train()
 
-user_profile_path = os.path.join(rec_utils.config["data_path"], f"{DATASET}.user")
-item_attr_path = os.path.join(rec_utils.config["data_path"], f"{DATASET}.item")
 inter_path = os.path.join(rec_utils.config["data_path"], f"{DATASET}.inter")
-
 # 加载数据
-user_profile_df = pd.read_csv(user_profile_path, delimiter='\t')
-item_attr_df = pd.read_csv(item_attr_path, delimiter='\t')
+inter_df = pd.read_csv(inter_path, delimiter='\t')
+# 获取唯一的用户ID并排序
+unique_user_ids = sorted(inter_df["user_id:token"].unique())
 
 # 创建一个字典来存储所有用户的推荐结果
 recommendations = {}
 
-for user_id in tqdm(user_profile_df["user_id:token"].unique(),
+for user_id in tqdm(unique_user_ids,
                     desc=set_color(f"Generating recommendations result (top-{topK}) ", "pink"),
                     unit="user"):
     # 获取推荐物品ID和对应的分数

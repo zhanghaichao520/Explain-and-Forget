@@ -15,7 +15,7 @@ import pandas as pd
 # 获取candidate item 的传统推荐模型
 MODEL = "LightGCN"
 # 处理的数据集
-DATASET = "ml-100k"
+DATASET = "netflix"
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
 topK = [5, 10, 20]
 config_files = f"config_file/{DATASET}.yaml"
@@ -620,13 +620,13 @@ def get_test_interactions_from_rec_utils():
 
 def main():
     # 文件路径
-    base_rec_file = 'ml-100k_LightGCN_recommendations_top50.json'  # M_base推荐结果
-    retrain_rec_file = 'ml-100k-remain_LightGCN_remainset_top50.json'  # M_gold推荐结果
-    unlearned_rec_file = 'ml-100k_LightGCN_recommendations_top20_updated.json'  # M_unlearned推荐结果
+    base_rec_file = 'netflix_LightGCN_recommendations_top50.json'  # M_base推荐结果
+    retrain_rec_file = 'netflix-remain_LightGCN_remainset_top50.json'  # M_gold推荐结果
+    unlearned_rec_file = 'netflix_LightGCN_recommendations_top20_updated.json'  # M_unlearned推荐结果
     
     # 数据集文件路径
-    retain_dataset_file = 'dataset/ml-100k-remain/ml-100k-remain.inter'  # 保留集
-    forget_dataset_file = 'dataset/ml-100k-forget/ml-100k-forget.inter'  # 遗忘集
+    retain_dataset_file = 'dataset/netflix-remain/netflix-remain.inter'  # 保留集
+    forget_dataset_file = 'dataset/netflix-forget/netflix-forget.inter'  # 遗忘集
     
     print("正在加载数据...")
     
