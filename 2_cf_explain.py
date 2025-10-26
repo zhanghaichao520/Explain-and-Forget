@@ -1,16 +1,17 @@
 import torch
-import json
-import pandas as pd
-from recbole_utils import RecUtils
 import os
-import numpy as np
-# 配置参数
-MODEL = "BPR"
-DATASET = "ml-100k" 
-topK = 50
-config_files = f"config_file/{DATASET}.yaml"
-config = {"normalize_all": False}
-config_file_list = config_files.strip().split(" ") if config_files else None
+from recbole_utils import RecUtils
+import pandas as pd
+import os
+import json
+from tqdm import tqdm
+from recbole.utils import set_color
+from enum import Enum
+import sys
+import os
+# 从通用配置文件导入配置参数
+from config import MODEL, DATASET, TOPK, topK
+
 
 def load_recommendations(file_path):
     """加载推荐结果文件"""
@@ -378,51 +379,29 @@ def save_all_explanations_to_file(all_explanations, output_file=f"{DATASET}_{MOD
     
     print(f"所有解释结果已保存到 {output_file}")
 
-def find_model_file(rec_utils, model, dataset):
-    """查找模型文件"""
-    model_file = None
-    
-    # 首先在checkpoint_dir中查找
-    checkpoint_dir = rec_utils.config["checkpoint_dir"]
-    if os.path.exists(checkpoint_dir):
-        for filename in os.listdir(checkpoint_dir):
-            if model in filename and dataset in filename:
-                model_file = os.path.join(checkpoint_dir, filename)
-                break
-    
-    # 如果没找到，尝试在saved目录下查找
-    if model_file is None:
-        saved_dir = "saved"
-        if os.path.exists(saved_dir):
-            for filename in os.listdir(saved_dir):
-                if model in filename and dataset in filename:
-                    model_file = os.path.join(saved_dir, filename)
-                    break
-    
-    # 如果还是没找到，使用默认模型文件
-    if model_file is None:
-        saved_files = [f for f in os.listdir("saved") if f.endswith(".pth")]
-        if saved_files:
-            # 优先选择匹配数据集的模型
-            for filename in saved_files:
-                if dataset in filename:
-                    model_file = os.path.join("saved", filename)
-                    break
-            # 如果没有匹配的，选择第一个
-            if model_file is None:
-                model_file = os.path.join("saved", saved_files[0])
-    
-    return model_file
+def find_model_files(directory_path, model_name):
+    # 遍历文件夹中的所有文件
+    for filename in os.listdir(directory_path):
+        # 检查文件名是否包含 "abc"
+        if model_name in filename and DATASET in filename:
+            return os.path.join(directory_path, filename)
+
+    return None
+
 
 from tqdm import tqdm
 def main():
-
+    config_files = f"config_file/{DATASET}.yaml"
+    config = {"normalize_all": False}
+    config_file_list = (
+        config_files.strip().split(" ") if config_files else None
+    )
     # 初始化RecUtils
     rec_utils = RecUtils(model=MODEL, dataset=DATASET, config_file_list=config_file_list, config_dict=config)
-    
+
     # 查找模型文件
-    model_file = find_model_file(rec_utils, MODEL, DATASET)
-    
+    model_file = find_model_files(directory_path=rec_utils.config["checkpoint_dir"], model_name=MODEL)
+
     if model_file is None or not os.path.exists(model_file):
         raise FileNotFoundError(f"未找到匹配的模型文件: {model_file}")
     

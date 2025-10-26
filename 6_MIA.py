@@ -1,23 +1,18 @@
 import json
-import random
+import os
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import accuracy_score, roc_auc_score
-from sklearn.preprocessing import StandardScaler
-import sys
-sys.path.append('/root/haichao/LLM_rec_unlearning')
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 from recbole_utils import RecUtils
-import pandas as pd
+import random
+# 从通用配置文件导入配置参数
+from config import MODEL, DATASET
 
 # 获取candidate item 的传统推荐模型
-MODEL = "LightGCN"
+# MODEL = "LightGCN"
 # 处理的数据集
-DATASET = "netflix"
+# DATASET = "ml-1m"
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
-topK = [5, 10, 20]
+topK = [1,3,5]
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False, "topk": topK}
 config_file_list = (
@@ -620,13 +615,13 @@ def get_test_interactions_from_rec_utils():
 
 def main():
     # 文件路径
-    base_rec_file = 'netflix_LightGCN_recommendations_top50.json'  # M_base推荐结果
-    retrain_rec_file = 'netflix-remain_LightGCN_remainset_top50.json'  # M_gold推荐结果
-    unlearned_rec_file = 'netflix_LightGCN_recommendations_top20_updated.json'  # M_unlearned推荐结果
+    base_rec_file = 'ml-1m_LightGCN_recommendations_top50.json'  # M_base推荐结果
+    retrain_rec_file = 'ml-1m-remain_LightGCN_remainset_top50.json'  # M_gold推荐结果
+    unlearned_rec_file = 'ml-1m_LightGCN_recommendations_top20_updated.json'  # M_unlearned推荐结果
     
     # 数据集文件路径
-    retain_dataset_file = 'dataset/netflix-remain/netflix-remain.inter'  # 保留集
-    forget_dataset_file = 'dataset/netflix-forget/netflix-forget.inter'  # 遗忘集
+    retain_dataset_file = 'dataset/ml-1m-remain/ml-1m-remain.inter'  # 保留集
+    forget_dataset_file = 'dataset/ml-1m-forget/ml-1m-forget.inter'  # 遗忘集
     
     print("正在加载数据...")
     

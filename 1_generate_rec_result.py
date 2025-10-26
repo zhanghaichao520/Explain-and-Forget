@@ -6,6 +6,16 @@ import json
 from tqdm import tqdm
 from recbole.utils import set_color
 from enum import Enum
+import sys
+import os
+
+# 添加项目根目录到Python路径
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# 从通用配置文件导入配置参数
+from config import MODEL, DATASET, TOPK as topK
+
+
 def find_model_files(directory_path, model_name):
     # 遍历文件夹中的所有文件
     for filename in os.listdir(directory_path):
@@ -16,9 +26,9 @@ def find_model_files(directory_path, model_name):
     return None
 
 topK = 50
-MODEL = "BPR"
+# MODEL = "BPR"
 # 处理的数据集
-DATASET = "ml-100k"
+# DATASET = "ml-100k"
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False}

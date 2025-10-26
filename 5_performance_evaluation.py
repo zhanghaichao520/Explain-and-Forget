@@ -17,7 +17,7 @@ MODEL = "LightGCN"
 # 处理的数据集
 DATASET = "ml-1m"
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
-topK = [10,20]
+topK = [1,3,5,10]
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False, "topk": topK}
 config_file_list = (
@@ -118,4 +118,7 @@ for file_path in file_path_list:
     metric_val = ndcg.calculate_metric(data_struct)
     print(metric_val)
 
+    recall = Recall(rec_utils.config)
+    metric_val = recall.calculate_metric(data_struct)
+    print(metric_val)
     print("\n")

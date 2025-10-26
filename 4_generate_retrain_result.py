@@ -20,9 +20,9 @@ def find_model_files(directory_path, model_name):
 topK = 50
 HISTORY_INTER_LIMIT = 100
 # 获取candidate item 的传统推荐模型
-MODEL = "LightGCN"
+MODEL = "BPR"
 # 处理的数据集
-DATASET = "ml-1m-remain"
+DATASET = "ml-100k-remain"
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False}

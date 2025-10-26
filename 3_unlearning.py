@@ -3,16 +3,22 @@ import time
 from recbole_utils import RecUtils
 import pandas as pd
 import json
+import os
+from recbole_utils import RecUtils
+
+# 从通用配置文件导入配置参数
+from config import MODEL, DATASET, TOPK as topK, ALPHA as alpha
+
 from tqdm import tqdm
 from recbole.utils import set_color
 from enum import Enum
 import numpy as np
 import torch
+import random
 
-MODEL = "LightGCN"
-# 处理的数据集
-DATASET = "ml-1m"  
+strategy = None
 TOPK=20
+alpha=1
 # 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
 config_files = f"config_file/{DATASET}.yaml"
 config = {"normalize_all": False}
@@ -62,7 +68,7 @@ def split_trainset_for_unlearning_by_interactions(trainset, forget_ratio=0.01, r
     
     Args:
         trainset: 原始训练集DataFrame
-        forget_ratio: 需要遗忘的数据比例，默认为0.1(10%)
+        forget_ratio: 需要遗忘的数据比例，默认为0.01(10%)
         random_state: 随机种子，确保结果可重现
         
     Returns:
@@ -141,36 +147,17 @@ with open(remain_file_path, 'w', newline='') as f:
 print(f"Forget set已保存至: {forget_file_path}")
 print(f"Remain set已保存至: {remain_file_path}")
 
-def find_model_file(rec_utils, model, dataset):
-    """查找模型文件"""
-    model_file = None
-    
-    # 如果没找到，尝试在saved目录下查找
-    if model_file is None:
-        saved_dir = "saved"
-        if os.path.exists(saved_dir):
-            for filename in os.listdir(saved_dir):
-                if model in filename and dataset in filename:
-                    model_file = os.path.join(saved_dir, filename)
-                    break
-    
-    # 如果还是没找到，使用默认模型文件
-    if model_file is None:
-        saved_files = [f for f in os.listdir("saved") if f.endswith(".pth")]
-        if saved_files:
-            # 优先选择匹配数据集的模型
-            for filename in saved_files:
-                if dataset in filename:
-                    model_file = os.path.join("saved", filename)
-                    break
-            # 如果没有匹配的，选择第一个
-            if model_file is None:
-                model_file = os.path.join("saved", saved_files[0])
-    
-    return model_file
+def find_model_files(directory_path, model_name):
+    # 遍历文件夹中的所有文件
+    for filename in os.listdir(directory_path):
+        # 检查文件名是否包含 "abc"
+        if model_name in filename and DATASET in filename:
+            return os.path.join(directory_path, filename)
+
+    return None
 
 # 查找模型文件
-model_file = find_model_file(rec_utils, MODEL, DATASET)
+model_file = find_model_files(directory_path=rec_utils.config["checkpoint_dir"], model_name=MODEL)
 print(f"使用的模型文件: {model_file}")
 
 # 加载推荐结果
@@ -287,11 +274,9 @@ def unlearning_process_single(user_id_str, forget_item_id_str, current_recommend
     
     # 为每个推荐物品根据解释调整分数
     adjusted_scores = []
-    
     for item_id, original_score in all_recommendations:
         # 从已获取的解释中查找
         explanations = all_explanations.get(item_id, [])
-        
         # 检查被遗忘物品是否在解释中
         contribution_weight = 0.0
         for explanation in explanations:
@@ -303,7 +288,14 @@ def unlearning_process_single(user_id_str, forget_item_id_str, current_recommend
         adjusted_score = original_score
         if contribution_weight > 0:
             # 分数下降 importance * 2
-            adjusted_score = original_score - (contribution_weight * 1)
+            if strategy == None:
+                adjusted_score = original_score - (contribution_weight * 1)
+            elif strategy == 'reverse':
+                adjusted_score = original_score + (contribution_weight * 1) * 5
+        if strategy == 'random':
+            if random.random() < 0.5:
+                adjusted_score = original_score - (random.random() - 0.5) * 5
+            
             # if user_id_str == '744':
                 # print(f"{user_id_str} 的 {item_id} 的原始分数: {original_score}, 调整后分数: {adjusted_score}")
 
