@@ -1,0 +1,483 @@
+import os
+import time
+from recbole_utils import RecUtils
+import pandas as pd
+import json
+from tqdm import tqdm
+from recbole.utils import set_color
+from enum import Enum
+import numpy as np
+import torch
+
+MODEL = "LightGCN"
+# 处理的数据集
+DATASET = "ml-1m"  
+TOPK=20
+# 默认配置文件， 注意 normalize_all: False 便于保留原始的时间和rating
+config_files = f"config_file/{DATASET}.yaml"
+config = {"normalize_all": False}
+config_file_list = (
+    config_files.strip().split(" ") if config_files else None
+)
+
+# 初始化RecUtils
+rec_utils = RecUtils(model=MODEL, dataset=DATASET, config_file_list=config_file_list, config_dict=config)
+
+# 将训练集划分为1%的Forget set和99%的Remain set
+def split_trainset_for_unlearning(trainset, forget_ratio=0.1, random_state=42):
+    """
+    将训练集划分为Forget set和Remain set
+    
+    Args:
+        trainset: 原始训练集DataFrame
+        forget_ratio: 需要遗忘的数据比例，默认为0.1(1%)
+        random_state: 随机种子，确保结果可重现
+        
+    Returns:
+        forget_set: 需要遗忘的数据集
+        remain_set: 剩余需要保留的数据集
+    """
+    # 设置随机种子以确保结果可重现
+    np.random.seed(random_state)
+    
+    # 获取唯一的用户ID
+    unique_users = trainset['user_id'].unique()
+    
+    # 随机选择1%的用户作为forget set
+    num_forget_users = max(1, int(len(unique_users) * forget_ratio))
+    forget_users = np.random.choice(unique_users, size=num_forget_users, replace=False)
+    
+    # 创建布尔索引
+    forget_mask = trainset['user_id'].isin(forget_users)
+    
+    # 划分数据集
+    forget_set = trainset[forget_mask].copy()
+    remain_set = trainset[~forget_mask].copy()
+    
+    return forget_set, remain_set
+
+def split_trainset_for_unlearning_by_interactions(trainset, forget_ratio=0.1, random_state=42):
+    """
+    将训练集按交互记录随机划分为Forget set和Remain set（不按用户划分）
+    
+    Args:
+        trainset: 原始训练集DataFrame
+        forget_ratio: 需要遗忘的数据比例，默认为0.1(10%)
+        random_state: 随机种子，确保结果可重现
+        
+    Returns:
+        forget_set: 需要遗忘的数据集
+        remain_set: 剩余需要保留的数据集
+    """
+    # 设置随机种子以确保结果可重现
+    np.random.seed(random_state)
+    
+    # 获取所有交互记录的索引
+    all_indices = trainset.index.tolist()
+    
+    # 随机选择指定比例的交互记录作为forget set
+    num_forget_interactions = max(1, int(len(all_indices) * forget_ratio))
+    forget_indices = np.random.choice(all_indices, size=num_forget_interactions, replace=False)
+    
+    # 创建布尔索引
+    forget_mask = trainset.index.isin(forget_indices)
+    
+    # 划分数据集
+    forget_set = trainset[forget_mask].copy()
+    remain_set = trainset[~forget_mask].copy()
+    
+    return forget_set, remain_set
+
+# 执行划分
+# 使用按用户划分的方法
+# forget_set, remain_set = split_trainset_for_unlearning(rec_utils.ori_trainset)
+
+# 使用按交互记录随机划分的方法
+forget_set, remain_set = split_trainset_for_unlearning_by_interactions(rec_utils.ori_trainset)
+
+# 输出划分结果信息
+print(f"原始训练集大小: {len(rec_utils.ori_trainset)}")
+print(f"Forget set大小: {len(forget_set)} ({len(forget_set)/len(rec_utils.ori_trainset)*100:.2f}%)")
+print(f"Remain set大小: {len(remain_set)} ({len(remain_set)/len(rec_utils.ori_trainset)*100:.2f}%)")
+
+# 保存划分结果到文件（CSV格式）
+# forget_set.to_csv(f"{DATASET}_forget_set.csv", index=False)
+# remain_set.to_csv(f"{DATASET}_remain_set.csv", index=False)
+
+# print(f"Forget set已保存至: {DATASET}_forget_set.csv")
+# print(f"Remain set已保存至: {DATASET}_remain_set.csv")
+
+# 保存划分结果到文件（与原始数据集相同的格式）
+# 创建目录（如果不存在）
+os.makedirs(f"dataset/{DATASET}-forget", exist_ok=True)
+os.makedirs(f"dataset/{DATASET}-remain", exist_ok=True)
+
+# 保存forget set，添加表头
+forget_file_path = f"dataset/{DATASET}-forget/{DATASET}-forget.inter"
+with open(forget_file_path, 'w', newline='') as f:
+    # 根据数据集类型确定列顺序
+    if DATASET == "netflix-process":
+        f.write("item_id:token\tuser_id:token\trating:float\ttimestamp:float\n")
+        # 保存时调整列顺序以匹配原始文件格式
+        forget_set_reorder = forget_set[['item_id', 'user_id', 'rating', 'timestamp']] if 'timestamp' in forget_set.columns else forget_set[['item_id', 'user_id', 'rating']]
+        forget_set_reorder.to_csv(f, sep='\t', index=False, header=False)
+    else:
+        f.write("user_id:token\titem_id:token\trating:float\ttimestamp:float\n")
+        forget_set.to_csv(f, sep='\t', index=False, header=False)
+
+# 保存remain set，添加表头
+remain_file_path = f"dataset/{DATASET}-remain/{DATASET}-remain.inter"
+with open(remain_file_path, 'w', newline='') as f:
+    # 根据数据集类型确定列顺序
+    if DATASET == "netflix":
+        f.write("item_id:token\tuser_id:token\trating:float\ttimestamp:float\n")
+        # 保存时调整列顺序以匹配原始文件格式
+        remain_set_reorder = remain_set[['item_id', 'user_id', 'rating', 'timestamp']] if 'timestamp' in remain_set.columns else remain_set[['item_id', 'user_id', 'rating']]
+        remain_set_reorder.to_csv(f, sep='\t', index=False, header=False)
+    else:
+        f.write("user_id:token\titem_id:token\trating:float\ttimestamp:float\n")
+        remain_set.to_csv(f, sep='\t', index=False, header=False)
+
+print(f"Forget set已保存至: {forget_file_path}")
+print(f"Remain set已保存至: {remain_file_path}")
+
+def find_model_file(rec_utils, model, dataset):
+    """查找模型文件"""
+    model_file = None
+    
+    # 如果没找到，尝试在saved目录下查找
+    if model_file is None:
+        saved_dir = "saved"
+        if os.path.exists(saved_dir):
+            for filename in os.listdir(saved_dir):
+                if model in filename and dataset in filename:
+                    model_file = os.path.join(saved_dir, filename)
+                    break
+    
+    # 如果还是没找到，使用默认模型文件
+    if model_file is None:
+        saved_files = [f for f in os.listdir("saved") if f.endswith(".pth")]
+        if saved_files:
+            # 优先选择匹配数据集的模型
+            for filename in saved_files:
+                if dataset in filename:
+                    model_file = os.path.join("saved", filename)
+                    break
+            # 如果没有匹配的，选择第一个
+            if model_file is None:
+                model_file = os.path.join("saved", saved_files[0])
+    
+    return model_file
+
+# 查找模型文件
+model_file = find_model_file(rec_utils, MODEL, DATASET)
+print(f"使用的模型文件: {model_file}")
+
+# 加载推荐结果
+def load_recommendations(file_path):
+    """加载推荐结果文件"""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+# 查找推荐结果文件
+rec_file = f"{DATASET}_{MODEL}_recommendations_top50.json"
+# 检查文件是否存在，如果不存在尝试其他可能的文件
+if not os.path.exists(rec_file):
+    possible_files = [f for f in os.listdir(".") if f.endswith("_recommendations_top50.json")]
+    if possible_files:
+        rec_file = possible_files[0]
+
+if not os.path.exists(rec_file):
+    raise FileNotFoundError(f"未找到推荐结果文件: {rec_file}")
+
+# 加载推荐结果
+recommendations = load_recommendations(rec_file)
+print(f"加载推荐结果文件: {rec_file}")
+
+def get_user_topk_recommendations(user_id_str, topk=50):
+    """
+    获取用户的Top-K推荐列表
+    
+    Args:
+        user_id_str: 用户ID
+        topk: 推荐数量
+        
+    Returns:
+        list: 推荐物品列表（已按分数从高到低排序）
+    """
+    if user_id_str in recommendations:
+        # 如果recommendations包含分数信息（字典格式），则提取物品ID
+        user_recs = recommendations[user_id_str]
+        if isinstance(user_recs, dict):
+            # 新格式：{item_id: score, ...}
+            # 按分数排序并提取前topk*2个物品ID
+            sorted_items = sorted(user_recs.items(), key=lambda x: x[1], reverse=True)
+            # 返回字典格式以保留分数信息
+            return dict(sorted_items[:topk*2])
+        else:
+            # 旧格式：[item_id, ...]
+            # 为了支持递补机制，我们返回两倍长度的推荐列表
+            return user_recs[:topk*2]
+    return []
+
+def load_explanations(file_path=f"{DATASET}_{MODEL}_all_counterfactual_explanations.json"):
+    """
+    加载预先生成的反事实解释
+    
+    Args:
+        file_path: 解释文件路径
+        
+    Returns:
+        dict: 解释数据
+    """
+    if os.path.exists(file_path):
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+# 加载反事实解释数据
+explanations_data = load_explanations()
+print(f"加载反事实解释数据: {'成功' if explanations_data else '未找到文件'}")
+
+def get_explanation_for_user_item(user_id_str, target_item_str, k=5):
+    """
+    获取指定用户和物品的反事实解释
+    
+    Args:
+        user_id_str: 用户ID
+        target_item_str: 目标物品ID
+        k: 返回前k个最重要的解释
+        
+    Returns:
+        list: 解释结果
+    """
+    # 从预先生成的解释数据中获取
+    if user_id_str in explanations_data and target_item_str in explanations_data[user_id_str]:
+        explanations = explanations_data[user_id_str][target_item_str]
+        # 按重要性排序并返回前k个
+        explanations.sort(key=lambda x: x['importance'], reverse=True)
+        return explanations[:k]
+    return []
+
+def unlearning_process_single(user_id_str, forget_item_id_str, current_recommendations, topk=50, alpha=1):
+    """
+    执行单次遗忘学习过程，基于原始推荐分数进行调整
+    
+    Args:
+        user_id_str: 用户ID
+        forget_item_id_str: 需要遗忘的物品ID
+        current_recommendations: 当前推荐列表（可能是物品ID列表或{item_id: score}字典）
+        topk: 推荐列表长度
+        alpha: 调整因子
+        
+    Returns:
+        list or dict: 调整后的推荐列表（如果是字典输入则返回字典，否则返回列表）
+    """
+
+
+    # 新格式：{item_id: score, ...}，按分数排序
+    sorted_items = sorted(current_recommendations.items(), key=lambda x: x[1], reverse=True)
+    # 不进行切片操作，处理所有推荐项
+    all_recommendations = [(item_id, score) for item_id, score in sorted_items]
+
+    # 一次性获取所有推荐物品的解释
+    all_explanations = {}
+    for item_id, score in all_recommendations:
+        explanations = get_explanation_for_user_item(user_id_str, item_id, k=10)
+        all_explanations[item_id] = explanations
+    
+    # 为每个推荐物品根据解释调整分数
+    adjusted_scores = []
+    
+    for item_id, original_score in all_recommendations:
+        # 从已获取的解释中查找
+        explanations = all_explanations.get(item_id, [])
+        
+        # 检查被遗忘物品是否在解释中
+        contribution_weight = 0.0
+        for explanation in explanations:
+            if explanation['item_id'] == forget_item_id_str:
+                contribution_weight = explanation['importance']
+                break
+        
+        # 根据贡献度调整分数
+        adjusted_score = original_score
+        if contribution_weight > 0:
+            # 分数下降 importance * alpha
+            adjusted_score = original_score - (contribution_weight * alpha)
+            # if user_id_str == '744':
+                # print(f"{user_id_str} 的 {item_id} 的原始分数: {original_score}, 调整后分数: {adjusted_score}")
+
+        adjusted_scores.append((item_id, adjusted_score))
+    
+    # 基于调整后的分数重新排序
+    # 按分数降序排序
+    adjusted_scores.sort(key=lambda x: x[1], reverse=True)
+    
+
+    adjusted_recommendations = {item_id: score for item_id, score in adjusted_scores}
+
+    return adjusted_recommendations
+
+def batch_unlearning_process(forget_set, topk=50, alpha=1):
+    """
+    批量处理遗忘学习过程
+    
+    Args:
+        forget_set: 需要遗忘的数据集
+        topk: 推荐列表长度
+        alpha: 调整因子
+        
+    Returns:
+        dict: 所有用户的调整后推荐结果
+    """
+    # 按用户分组
+    forget_users = forget_set['user_id'].unique()
+    
+    # 存储所有用户的调整后推荐结果
+    adjusted_recommendations_all = {}
+    
+    print(f"\n开始批量处理 {len(forget_users)} 个用户的遗忘学习过程")
+    
+    for user_id in tqdm(forget_users, desc="处理用户遗忘请求"):
+        # 获取该用户需要遗忘的所有物品
+        user_forget_items = forget_set[forget_set['user_id'] == user_id]['item_id'].tolist()
+        
+        if user_forget_items:
+            # 初始化调整后的推荐列表为原始推荐列表（不进行切片）
+            current_recommendations = get_user_topk_recommendations(str(user_id), topk)
+            
+            # 对于每个需要遗忘的物品，依次调整推荐列表
+            for i, forget_item in enumerate(user_forget_items):
+                # 执行单次遗忘学习过程
+                adjusted_rec = unlearning_process_single(str(user_id), str(forget_item), current_recommendations, topk, alpha)
+                # 更新当前推荐列表，用于下一次迭代
+                current_recommendations = adjusted_rec
+            
+
+            # 对于字典格式，按分数排序后取前K个
+            sorted_items = sorted(current_recommendations.items(), key=lambda x: x[1], reverse=True)
+            adjusted_recommendations_all[user_id] = {
+                'adjusted_recommendations': [item_id for item_id, score in sorted_items[:topk]],  # 只在最终结果中取Top-K
+                'adjusted_recommendations_with_scores': dict(sorted_items[:topk]),  # 保存调整后的分数
+                'forget_items': user_forget_items,
+                'forget_items_count': len(user_forget_items)
+            }
+
+    
+    return adjusted_recommendations_all
+
+def evaluate_unlearning_effect(original_recommendations, adjusted_recommendations_all, topk=10):
+    """
+    评估遗忘学习效果
+    
+    Args:
+        original_recommendations: 原始推荐结果
+        adjusted_recommendations_all: 调整后的推荐结果
+        topk: 评估的Top-K数量
+        
+    Returns:
+        dict: 评估结果
+    """
+    evaluation_results = {
+        'total_users': 0,
+        'users_with_changes': 0,
+        'total_items': 0,
+        'changed_items': 0,
+        'average_change_rate': 0.0,
+        'detailed_results': {}
+    }
+    
+    total_change_count = 0
+    total_item_count = 0
+    
+    for user_id, result in adjusted_recommendations_all.items():
+        if str(user_id) in original_recommendations:
+            # 处理不同格式的推荐结果
+            original_user_recs = original_recommendations[str(user_id)]
+            if isinstance(original_user_recs, dict):
+                # 新格式：{item_id: score, ...}，按分数排序提取前topk个物品ID
+                sorted_items = sorted(original_user_recs.items(), key=lambda x: x[1], reverse=True)
+                original_rec = [item_id for item_id, score in sorted_items][:topk]
+            else:
+                # 旧格式：[item_id, ...]
+                original_rec = original_user_recs[:topk]
+                
+            adjusted_rec = result['adjusted_recommendations'][:topk]
+            
+            # 计算变化
+            changes = sum(1 for i in range(min(len(original_rec), len(adjusted_rec))) 
+                         if original_rec[i] != adjusted_rec[i])
+            
+            change_rate = changes / topk if topk > 0 else 0
+            
+            evaluation_results['detailed_results'][user_id] = {
+                'original_recommendations': original_rec,
+                'adjusted_recommendations': adjusted_rec,
+                'changes': changes,
+                'change_rate': change_rate,
+                'forget_items': result['forget_items']
+            }
+            
+            evaluation_results['total_users'] += 1
+            if changes > 0:
+                evaluation_results['users_with_changes'] += 1
+                
+            total_change_count += changes
+            total_item_count += topk
+    
+    evaluation_results['total_items'] = total_item_count
+    evaluation_results['changed_items'] = total_change_count
+    evaluation_results['average_change_rate'] = total_change_count / total_item_count if total_item_count > 0 else 0.0
+    
+    return evaluation_results
+
+
+# 创建结果文件夹
+import os
+results_dir = f"{DATASET}_{MODEL}_alpha_experiment_results"
+os.makedirs(results_dir, exist_ok=True)
+
+# Alpha值从0.1到1.0，每隔0.1取值一次
+alpha_values = [0.01, 0.05, 0.1, 0.3, 0.5, 0.7, 1, 3, 5, 7, 9]
+for alpha in alpha_values:
+    print(f"\n开始执行遗忘学习过程，alpha = {alpha}...")
+    start_time = time.time()
+
+    adjusted_results = batch_unlearning_process(forget_set, topk=TOPK, alpha=alpha)
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+
+    print(f"遗忘学习过程耗时: {elapsed_time:.2f} 秒")
+
+    # 创建新的推荐结果字典，将调整后的结果替换原始结果
+    updated_recommendations = recommendations.copy()  # 复制原始推荐结果
+
+    # 将调整后的推荐结果替换到新的推荐结果字典中
+    for user_id, result in adjusted_results.items():
+        adjusted_recs = result['adjusted_recommendations']
+        # 如果原始推荐结果包含分数信息，则保持相同的格式
+        if isinstance(recommendations.get(str(user_id)), dict):
+            # 使用调整后的分数信息
+            adjusted_scores = result.get('adjusted_recommendations_with_scores', {})
+            # 确保只包含在调整后推荐列表中的物品
+            user_scores = {item_id: score for item_id, score in adjusted_scores.items() 
+                          if item_id in adjusted_recs}
+            # 按照分数倒排产生最终排名
+            sorted_user_scores = dict(sorted(user_scores.items(), key=lambda x: x[1], reverse=True))
+            
+            updated_recommendations[str(user_id)] = sorted_user_scores
+        else:
+            # 保持原始格式
+            updated_recommendations[str(user_id)] = adjusted_recs
+
+
+    # 保存更新后的推荐结果到新文件
+    updated_output_file = f"{results_dir}/{DATASET}_{MODEL}_recommendations_top{TOPK}_alpha{alpha}.json"
+    with open(updated_output_file, 'w', encoding='utf-8') as f:
+        json.dump(updated_recommendations, f, ensure_ascii=False, indent=2)
+
+    print(f"\nunlearning推荐结果已保存到 {updated_output_file}")
+
+    
